@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -13,11 +14,22 @@ import (
 	https://www.investopedia.com/ask/answers/100314/whats-difference-between-market-order-and-limit-order.asp
 */
 
-type OrderType int
+var (
+	ErrNotFound = errors.New("not found")
+)
+
+type OrderType string
 
 const (
-	BID_ORDER OrderType = iota // BUY
-	ASK_ORDER                  // SELL
+	MarketOrder OrderType = "MARKET_ORDER"
+	LimitOrder  OrderType = "LIMIT_ORDER"
+)
+
+type OrderPlacement string
+
+const (
+	BID_ORDER OrderPlacement = "BID"
+	ASK_ORDER OrderPlacement = "ASK"
 )
 
 type Match struct {
@@ -28,23 +40,35 @@ type Match struct {
 }
 
 type Order struct {
-	Type      OrderType
-	Size      float64
-	Limit     *Limit
-	Timestamp int64
+	ID             int64          `json:"id"`
+	OrderPlacement OrderPlacement `json:"order_placement"`
+	Size           float64        `json:"size"`
+	Limit          *Limit         `json:"-"`
+	Timestamp      int64          `json:"timestamp"`
 }
 
 type Orders []*Order
+
+var orderIdSequence int64 = 0
 
 func (o Orders) Len() int           { return len(o) }
 func (o Orders) Swap(i, j int)      { o[i], o[j] = o[j], o[i] }
 func (o Orders) Less(i, j int) bool { return o[i].Timestamp < o[j].Timestamp }
 
-func NewOrder(orderType OrderType, size float64) *Order {
+type OrderMetadata struct {
+	Order  *Order
+	Market string
+}
+
+var OrderIndex = make(map[int64]OrderMetadata)
+
+func NewOrder(orderPlacement OrderPlacement, size float64) *Order {
+	orderIdSequence += 1
 	return &Order{
-		Size:      size,
-		Type:      orderType,
-		Timestamp: time.Now().UnixNano(),
+		ID:             orderIdSequence,
+		Size:           size,
+		OrderPlacement: orderPlacement,
+		Timestamp:      time.Now().UnixNano(),
 	}
 }
 
@@ -133,7 +157,7 @@ func (l *Limit) Fill(order *Order) []Match {
 func (l *Limit) fillOrder(matchingOrder, order *Order) Match {
 	var ask, bid *Order
 
-	if order.Type == BID_ORDER {
+	if order.OrderPlacement == BID_ORDER {
 		ask, bid = matchingOrder, order
 	} else {
 		ask, bid = order, matchingOrder
@@ -157,6 +181,8 @@ func (l *Limit) String() string {
 }
 
 type OrderBook struct {
+	Market string
+
 	asks []*Limit
 	bids []*Limit
 
@@ -164,8 +190,9 @@ type OrderBook struct {
 	BidLimits map[float64]*Limit
 }
 
-func NewOrderBook() *OrderBook {
+func NewOrderBook(market string) *OrderBook {
 	return &OrderBook{
+		Market:    market,
 		asks:      []*Limit{},
 		bids:      []*Limit{},
 		AskLimits: make(map[float64]*Limit),
@@ -176,7 +203,7 @@ func NewOrderBook() *OrderBook {
 func (ob *OrderBook) PlaceMarketOrder(order *Order) ([]Match, error) {
 	matches := []Match{}
 
-	if order.Type == BID_ORDER {
+	if order.OrderPlacement == BID_ORDER {
 		if order.Size > ob.AskTotalVolume() {
 			return nil, stacktrace.NewError("PlaceMarketOrder: not enough ask volume in the market. asks: %.2f, bids: %.2f", ob.AskTotalVolume(), order.Size)
 		}
@@ -227,18 +254,20 @@ func (ob *OrderBook) BidTotalVolume() float64 {
 	return totalVolume
 }
 
-func (ob *OrderBook) PlaceLimitOrder(price float64, order *Order) {
+func (ob *OrderBook) PlaceLimitOrder(price float64, order *Order) error {
 	var limit *Limit
-	if order.Type == BID_ORDER {
+	if order.OrderPlacement == BID_ORDER {
 		limit = ob.BidLimits[price]
-	} else {
+	} else if order.OrderPlacement == ASK_ORDER {
 		limit = ob.AskLimits[price]
+	} else {
+		return errors.New("invalid order placement")
 	}
 
 	// Limit volume doesn't exist yet
 	if limit == nil {
 		limit = NewLimit(price)
-		if order.Type == BID_ORDER {
+		if order.OrderPlacement == BID_ORDER {
 			ob.bids = append(ob.bids, limit)
 			ob.BidLimits[price] = limit
 		} else {
@@ -248,10 +277,40 @@ func (ob *OrderBook) PlaceLimitOrder(price float64, order *Order) {
 	}
 
 	limit.AddOrder(order)
+	OrderIndex[order.ID] = OrderMetadata{
+		Order:  order,
+		Market: ob.Market,
+	}
+
+	return nil
 }
 
-func (ob *OrderBook) deleteLimit(limitType OrderType, limit *Limit) {
-	if limitType == BID_ORDER {
+func (ob *OrderBook) CancelOrderByID(orderId int64, orderPlacement OrderPlacement) error {
+	var limits []*Limit
+	if orderPlacement == BID_ORDER {
+		limits = ob.bids
+	} else {
+		limits = ob.asks
+	}
+
+	for _, limit := range limits {
+		for _, order := range limit.Orders {
+			if order.ID == orderId {
+				limit.DeleteOrder(order)
+				delete(OrderIndex, order.ID)
+				if limit.TotalVolume == 0 {
+					ob.deleteLimit(orderPlacement, limit)
+				}
+				return nil
+			}
+		}
+	}
+
+	return ErrNotFound
+}
+
+func (ob *OrderBook) deleteLimit(limitPlacement OrderPlacement, limit *Limit) {
+	if limitPlacement == BID_ORDER {
 		delete(ob.BidLimits, limit.Price)
 
 		for i := 0; i < len(ob.bids); i++ {

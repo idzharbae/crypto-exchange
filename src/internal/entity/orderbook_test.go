@@ -26,7 +26,7 @@ func TestLimit(t *testing.T) {
 
 func TestPlaceLimitOrder(t *testing.T) {
 	Convey("Test PlaceLimitOrder", t, func() {
-		ob := entity.NewOrderBook()
+		ob := entity.NewOrderBook("test")
 
 		buyOrder := entity.NewOrder(entity.BID_ORDER, 10)
 		buyOrder2 := entity.NewOrder(entity.BID_ORDER, 2000)
@@ -40,7 +40,7 @@ func TestPlaceLimitOrder(t *testing.T) {
 func TestPlaceMarketOrder(t *testing.T) {
 	Convey("When placing market order", t, func() {
 		Convey("Should return error if not enough volume", func() {
-			ob := entity.NewOrderBook()
+			ob := entity.NewOrderBook("test")
 			sellOrder := entity.NewOrder(entity.ASK_ORDER, 100)
 			ob.PlaceLimitOrder(10_000, sellOrder)
 			sellOrder2 := entity.NewOrder(entity.ASK_ORDER, 100)
@@ -54,7 +54,7 @@ func TestPlaceMarketOrder(t *testing.T) {
 		})
 
 		Convey("Should return error if not enough volume (ask)", func() {
-			ob := entity.NewOrderBook()
+			ob := entity.NewOrderBook("test")
 			buyOrder := entity.NewOrder(entity.BID_ORDER, 100)
 			ob.PlaceLimitOrder(10_000, buyOrder)
 			buyOrder2 := entity.NewOrder(entity.BID_ORDER, 100)
@@ -68,7 +68,7 @@ func TestPlaceMarketOrder(t *testing.T) {
 		})
 
 		Convey("Should return matches if volume is enough", func() {
-			ob := entity.NewOrderBook()
+			ob := entity.NewOrderBook("test")
 			sellOrder := entity.NewOrder(entity.ASK_ORDER, 100)
 			ob.PlaceLimitOrder(10_000, sellOrder)
 			sellOrder2 := entity.NewOrder(entity.ASK_ORDER, 350)
@@ -95,7 +95,7 @@ func TestPlaceMarketOrder(t *testing.T) {
 		})
 
 		Convey("Should return matches if volume is enough (ask)", func() {
-			ob := entity.NewOrderBook()
+			ob := entity.NewOrderBook("test")
 			buyOrder := entity.NewOrder(entity.BID_ORDER, 100)
 			ob.PlaceLimitOrder(13_000, buyOrder)
 			buyOrder2 := entity.NewOrder(entity.BID_ORDER, 350)
